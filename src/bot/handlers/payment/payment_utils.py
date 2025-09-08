@@ -1,13 +1,13 @@
 import logging
 from aiogram import types
-from bot.services.payment_service import PaymentService
-from bot.services.user_service import UserService
-from config import settings
+from src.bot.services.payment_service import PaymentService
+from src.bot.services.user_service import UserService
+from src.config import settings
 from .keyboards import create_payment_keyboard, create_subscription_keyboard
-from validation import PaymentInput, validate_input
+from src.validation import PaymentInput, validate_input
 from decimal import Decimal
-from exceptions import ValidationError
-from error_handlers import error_handler
+from src.exceptions import ValidationError
+from src.error_handlers import error_handler
 
 logger = logging.getLogger(__name__)
 payment_service = PaymentService()
@@ -92,8 +92,8 @@ async def handle_payment_creation(session, user_id: int, days: int) -> tuple[str
     return text, keyboard
 
 async def handle_payment_error(e: Exception, user_id: int, callback: types.CallbackQuery) -> None:
-    from exceptions import ValidationError
-    from error_handlers import error_handler
+    from src.exceptions import ValidationError
+    from src.error_handlers import error_handler
     
     if isinstance(e, ValidationError):
         error_handler.log_error(e, {"user_id": user_id, "handler": "payment_creation"})

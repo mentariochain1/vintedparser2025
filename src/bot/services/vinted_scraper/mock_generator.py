@@ -39,6 +39,15 @@ def generate_user_login() -> str:
     """Generate random user login."""
     return f"user{random.randint(1000, 9999)}"
 
+def generate_city() -> str:
+    """Generate random Austrian city for location."""
+    austrian_cities = [
+        "Wien", "Graz", "Linz", "Salzburg", "Innsbruck",
+        "Klagenfurt", "Villach", "Wels", "Sankt Pölten", "Dornbirn",
+        "Wiener Neustadt", "Steyr", "Feldkirch", "Bregenz", "Leonding"
+    ]
+    return random.choice(austrian_cities)
+
 def generate_photo_url(item_id: int) -> str:
     """Generate photo URL for item."""
     random_num = random.randint(100, 999)
@@ -57,7 +66,10 @@ def create_mock_item(brand_name: str, item_name: str, category: str, sizes: List
         "price": {"amount": price, "currency_code": "EUR"},
         "brand": {"title": brand_name, "slug": brand_name.lower()},
         "size": {"title": random.choice(sizes)},
-        "user": {"login": generate_user_login()},
+        "user": {
+            "login": generate_user_login(),
+            "city": generate_city()
+        },
         "photo": {"url": generate_photo_url(item_id)},
         "url": f"{base_url}/items/{item_id}-{url_slug}",
         "path": f"/items/{item_id}-{url_slug}",

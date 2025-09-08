@@ -2,9 +2,9 @@ from aiogram import Router, types, F
 from aiogram.filters import CommandStart
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.user_service import UserService
-from bot.keyboards import ReplyKeyboards
-from db.base import get_db_session
+from ..services.user_service import UserService
+from ..keyboards import ReplyKeyboards
+from ...db.base import get_db_session
 
 router = Router()
 user_service = UserService()
@@ -82,7 +82,7 @@ async def start_handler(message: types.Message, command: CommandStart) -> None:
                 return
 
         except Exception:
-            from bot.services.user_service_asyncpg import user_service_asyncpg
+            from src.bot.services.user_service_asyncpg import user_service_asyncpg
             
             existing_user = await user_service_asyncpg.get_user_asyncpg(user_id)
 
@@ -145,8 +145,8 @@ async def start_handler(message: types.Message, command: CommandStart) -> None:
             await message.answer(welcome_text, reply_markup=ReplyKeyboards.main_menu())
 
     except Exception as error:
-        from error_handlers import error_handler
-        from exceptions import DatabaseError, ReferralError
+        from src.error_handlers import error_handler
+        from src.exceptions import DatabaseError, ReferralError
         
         # Supabase REST fallback removed; rely on search-only mode if DB is down
         

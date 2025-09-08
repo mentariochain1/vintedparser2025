@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import asyncpg
 
-from db.asyncpg_adapter import db_adapter
-from bot.services.user_service import UserService
+from src.db.asyncpg_adapter import db_adapter
+from src.bot.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 

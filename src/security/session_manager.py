@@ -15,8 +15,8 @@ import json
 import base64
 import logging
 
-from config import settings
-from exceptions import ValidationError, InvalidReferralTokenError
+from src.config import settings
+from src.exceptions import ValidationError, InvalidReferralTokenError
 
 logger = logging.getLogger(__name__)
 

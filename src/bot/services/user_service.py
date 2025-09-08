@@ -9,9 +9,9 @@ from typing import Optional
 
 from sqlalchemy .ext .asyncio import AsyncSession
 
-from config import settings
-from db.crud import ReferralCRUD ,UserCRUD
-from db.models import User
+from src.config import settings
+from src.db.crud import ReferralCRUD ,UserCRUD
+from src.db.models import User
 
 def utc_now() -> datetime:
     """Get current UTC time with timezone info."""

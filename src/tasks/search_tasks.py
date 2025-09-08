@@ -19,7 +19,7 @@ class SearchTaskManager:
         """Get VintedService instance, creating it lazily."""
         if self.vinted_service is None:
             # Import here to avoid circular imports and network calls during import
-            from bot.services.vinted_service import VintedService
+            from src.bot.services.vinted_service import VintedService
             self.vinted_service = VintedService()
         return self.vinted_service
 
@@ -120,8 +120,8 @@ class SearchTaskManager:
             user_id: User ID who initiated the search
         """
         # Import here to avoid circular imports
-        from db.base import get_db_session
-        from db.crud import ItemCRUD, PhotoCRUD
+        from src.db.base import get_db_session
+        from src.db.crud import ItemCRUD, PhotoCRUD
         
         async with get_db_session() as session:
             try:
@@ -181,8 +181,8 @@ class SearchTaskManager:
             List of item dictionaries with photos
         """
         # Import here to avoid circular imports
-        from db.base import get_db_session
-        from db.crud import ItemCRUD, PhotoCRUD
+        from src.db.base import get_db_session
+        from src.db.crud import ItemCRUD, PhotoCRUD
         
         async with get_db_session() as session:
             items = await ItemCRUD.get_recent(session, limit=limit, offset=offset)

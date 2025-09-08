@@ -1,10 +1,11 @@
-"""Main application entry point."""
+"""Main application entry point for Vinted Parser Bot."""
 
+import asyncio
 import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Final
 
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,10 +14,10 @@ from fastapi.responses import JSONResponse
 from aiogram.types import Update
 import redis.asyncio as redis
 
-from config import settings
-from db import close_database, health_check as db_health_check, init_database
-from bot.bot import create_bot, create_dispatcher, setup_bot_webhook, remove_bot_webhook, close_bot
-from middleware import (
+from .config import settings
+from .db import close_database, init_database
+from .bot.bot import create_bot, create_dispatcher, setup_bot_webhook, remove_bot_webhook, close_bot
+from .middleware import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
     RequestLoggingMiddleware,
@@ -24,7 +25,7 @@ from middleware import (
     MonitoringMiddleware,
     rate_limit
 )
-from monitoring import (
+from .monitoring import (
     get_prometheus_metrics,
     get_metrics_content_type,
     check_database_health,
@@ -32,185 +33,286 @@ from monitoring import (
     get_health_summary,
     get_logger
 )
-from error_handlers import error_handler, GracefulDegradation
-from exceptions import (
+from .error_handlers import error_handler
+from .exceptions import (
     VintedBotError, WebhookError, InvalidWebhookSignatureError,
     PaymentError, ConfigurationError, CircuitBreakerError,
-    ServiceUnavailableError, RateLimitError
+    ServiceUnavailableError, RateLimitError, ValidationError
 )
+from .security.session_manager import webhook_validator, input_sanitizer
 
+# Constants
+DEFAULT_TIMEOUT: Final[int] = 30
+MAX_REQUEST_SIZE: Final[int] = 1024 * 1024  # 1MB
+HEALTH_CHECK_TIMEOUT: Final[int] = 10
+
+# Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log", encoding="utf-8") if settings.is_production else logging.NullHandler(),
+    ]
 )
+
+# Configure SQLAlchemy logging to avoid request_id formatting errors
+sqlalchemy_logger = logging.getLogger('sqlalchemy.engine')
+sqlalchemy_logger.setLevel(logging.WARNING)  # Reduce SQLAlchemy logging noise
 logger = get_logger(__name__)
 
-# Global Redis connection for rate limiting
-redis_client: redis.Redis = None
+# Global Redis connection pool (lazy initialization)
+_redis_client: redis.Redis | None = None
 
 
 class CustomHTTPException(HTTPException):
     """Custom HTTP exception with additional context."""
-    
-    def __init__(self, status_code: int, detail: str, request_id: str = None):
+
+    def __init__(self, status_code: int, detail: str, request_id: str | None = None):
         super().__init__(status_code=status_code, detail=detail)
         self.request_id = request_id
+
+
+async def get_redis_client() -> redis.Redis:
+    """Get or create Redis client with connection pooling."""
+    global _redis_client
+
+    if _redis_client is None:
+        try:
+            _redis_client = redis.from_url(
+                settings.redis_url,
+                max_connections=settings.redis_pool_size,
+                retry_on_timeout=True,
+                socket_timeout=DEFAULT_TIMEOUT,
+                socket_connect_timeout=5,
+                health_check_interval=30,
+            )
+            await _redis_client.ping()
+            logger.info("Redis connection pool established")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {e}")
+            raise
+
+    return _redis_client
+
+
+async def close_redis_client() -> None:
+    """Close Redis client connection."""
+    global _redis_client
+
+    if _redis_client:
+        try:
+            await _redis_client.close()
+            logger.info("Redis connection closed")
+        except Exception as e:
+            logger.error(f"Error closing Redis connection: {e}")
+        finally:
+            _redis_client = None
 
 
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager."""
-    global redis_client
-    
+    """Application lifespan manager with proper resource management."""
+
     logger.info(f"Starting Vinted Parser Bot in {settings.environment} mode")
 
-    # Initialize Redis connection
+    # Initialize Redis with connection pooling
+    redis_client = None
     try:
-        redis_client = redis.from_url(settings.redis_url)
-        await redis_client.ping()
-        logger.info("Redis connection established")
+        redis_client = await get_redis_client()
+        app.state.redis = redis_client
+        logger.info("Redis connection pool initialized")
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
-        raise
+        logger.error(f"Failed to initialize Redis: {e}")
+        if settings.is_production:
+            raise  # Fail fast in production
+        logger.warning("Continuing without Redis (development mode)")
 
-    # Initialize database (PostgreSQL only)
+    # Initialize database with proper error handling
     db_initialized = False
-    sqlalchemy_initialized = False
-
     try:
         await init_database()
-        logger.info("Database initialized successfully")
         db_initialized = True
-        sqlalchemy_initialized = True
+        app.state.db_available = True
         app.state.use_asyncpg = False
-        app.state.use_rest_api = False
+        logger.info("Database initialized successfully")
     except Exception as e:
-        logger.warning(f"SQLAlchemy database initialization failed: {e}")
-        # Fallback to direct asyncpg pool only
-        try:
-            from db.asyncpg_adapter import init_asyncpg_database
-            await init_asyncpg_database()
-            logger.info("Asyncpg database adapter initialized successfully")
-            db_initialized = True
-            app.state.use_asyncpg = True
-            app.state.use_rest_api = False
-        except Exception as asyncpg_error:
-            logger.warning(f"Asyncpg database initialization failed: {asyncpg_error}")
+        logger.warning(f"Primary database initialization failed: {e}")
+
+        # Try fallback database adapter
+        if not settings.is_production:
+            try:
+                from src.db.asyncpg_adapter import init_asyncpg_database
+                await init_asyncpg_database()
+                db_initialized = True
+                app.state.db_available = True
+                app.state.use_asyncpg = True
+                logger.info("Fallback database adapter initialized")
+            except Exception as fallback_error:
+                logger.error(f"Fallback database initialization also failed: {fallback_error}")
+                app.state.db_available = False
+                app.state.use_asyncpg = False
+        else:
+            app.state.db_available = False
             app.state.use_asyncpg = False
-            logger.warning("Database unavailable, continuing without database")
-    
-    app.state.db_available = db_initialized
 
-    # Check database availability
     if not db_initialized:
-        logger.warning("Database unavailable, using fallback mode")
-    
-    # Initialize bot
-    bot = create_bot()
-    # Use full handlers; DB is now plain PostgreSQL
-    dp = create_dispatcher(use_fallback=False)
+        if settings.is_production:
+            raise RuntimeError("Database initialization failed in production")
+        logger.warning("Running in degraded mode without database")
 
-    app.state.bot = bot
-    app.state.dp = dp
-    app.state.redis = redis_client
-
+    # Initialize Telegram bot with proper error handling
+    bot = None
+    dp = None
     try:
+        bot = create_bot()
+        dp = create_dispatcher(use_fallback=not db_initialized)
+        app.state.bot = bot
+        app.state.dp = dp
+
+        # Setup webhook with retry logic
         await setup_bot_webhook(bot)
         logger.info("Bot webhook configured successfully")
+
     except Exception as e:
-        logger.error(f"Failed to configure bot webhook: {e}")
-        raise
+        logger.error(f"Failed to initialize bot: {e}")
+        if settings.is_production:
+            raise
+        logger.warning("Bot initialization failed, continuing in limited mode")
 
-    yield
+    # Store application state for health checks
+    app.state.startup_time = time.time()
+    app.state.version = "0.1.0"
 
-    logger.info("Shutting down Vinted Parser Bot")
+    logger.info("Application startup completed")
 
-    # Shutdown bot
     try:
-        await remove_bot_webhook(bot)
-        await close_bot(bot)
-        logger.info("Bot shutdown completed")
-    except Exception as e:
-        logger.error(f"Error shutting down bot: {e}")
+        yield
+    finally:
+        logger.info("Initiating graceful shutdown")
 
-    # Close Redis connection
-    try:
-        await redis_client.close()
-        logger.info("Redis connection closed")
-    except Exception as e:
-        logger.error(f"Error closing Redis connection: {e}")
+        # Shutdown bot first (most critical)
+        if bot:
+            try:
+                await remove_bot_webhook(bot)
+                await close_bot(bot)
+                logger.info("Bot shutdown completed")
+            except Exception as e:
+                logger.error(f"Error during bot shutdown: {e}")
 
-    # Close database
-    try:
-        if hasattr(app.state, 'use_asyncpg') and app.state.use_asyncpg:
-            from db.asyncpg_adapter import close_asyncpg_database
-            await close_asyncpg_database()
-        
-        # Always try to close SQLAlchemy if it was initialized
+        # Close Redis connections
+        if redis_client:
+            try:
+                await close_redis_client()
+            except Exception as e:
+                logger.error(f"Error during Redis shutdown: {e}")
+
+        # Close database connections
         try:
+            if hasattr(app.state, 'use_asyncpg') and app.state.use_asyncpg:
+                from src.db.asyncpg_adapter import close_asyncpg_database
+                await close_asyncpg_database()
+
             await close_database()
-        except Exception as sqlalchemy_error:
-            logger.debug(f"SQLAlchemy close error (expected if not initialized): {sqlalchemy_error}")
-            
-        logger.info("Database connections closed")
-    except Exception as e:
-        logger.error(f"Error closing database: {e}")
+            logger.info("Database connections closed")
+        except Exception as e:
+            logger.error(f"Error during database shutdown: {e}")
+
+        logger.info("Application shutdown completed")
 
 def create_app() -> FastAPI:
-    """Create and configure FastAPI application."""
+    """Create and configure FastAPI application with security hardening."""
+
+    # Configure OpenAPI documentation access
+    docs_url = "/docs" if settings.is_development else None
+    redoc_url = "/redoc" if settings.is_development else None
+    openapi_url = "/openapi.json" if settings.is_development else None
+
     app = FastAPI(
         title="Vinted Parser Bot",
         description="Telegram bot for parsing Vinted listings that ship to Austria",
         version="0.1.0",
         lifespan=lifespan,
-        debug=settings.debug,
+        debug=settings.is_development,  # Only debug in development
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
     )
 
-    # Add security middleware first
-    app.add_middleware(SecurityHeadersMiddleware, strict_transport_security=settings.is_production)
-    
-    # Add trusted host middleware
-    allowed_hosts = ["*"] if settings.debug else [
-        settings.webhook_domain.replace("https://", "").replace("http://", "")
-    ]
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
-    
-    # Add CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"] if settings.debug else [settings.webhook_domain],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"]
-    )
+    # Security: Configure trusted hosts
+    if settings.is_production:
+        allowed_hosts = [settings.webhook_domain.replace("https://", "").replace("http://", "")]
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+    else:
+        # Allow all hosts in development, but still use middleware for consistency
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
-    # Add request ID middleware
+    # Security: Add security headers
+    if settings.enable_security_headers:
+        app.add_middleware(
+            SecurityHeadersMiddleware,
+            strict_transport_security=settings.is_production
+        )
+
+    # CORS configuration with security
+    if settings.enable_cors:
+        cors_origins = ["*"] if settings.is_development else [settings.webhook_domain]
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "X-Requested-With",
+                "X-Telegram-Bot-Api-Secret-Token",
+                "X-Yookassa-Signature",
+                "X-Yookassa-Timestamp"
+            ],
+            expose_headers=[
+                "X-Request-ID",
+                "X-RateLimit-Limit",
+                "X-RateLimit-Remaining",
+                "X-RateLimit-Reset"
+            ],
+            max_age=86400,  # 24 hours
+        )
+
+    # Request processing middleware (order matters)
     app.add_middleware(RequestIDMiddleware)
-    
-    # Add monitoring middleware
-    app.add_middleware(MonitoringMiddleware)
-    
-    # Add request logging middleware
-    app.add_middleware(RequestLoggingMiddleware, log_body=settings.debug, max_body_size=1024)
-    
-    # Add rate limiting middleware (will be configured after Redis is available)
+    app.add_middleware(RequestLoggingMiddleware,
+                      log_body=settings.is_development,
+                      max_body_size=MAX_REQUEST_SIZE)
+
+    # Monitoring (must be after request ID for proper correlation)
+    if settings.enable_prometheus:
+        app.add_middleware(MonitoringMiddleware)
+
+    # Rate limiting middleware (async configuration)
     @app.middleware("http")
-    async def add_rate_limiting(request: Request, call_next):
-        """Add rate limiting middleware after Redis is available."""
+    async def rate_limiting_middleware(request: Request, call_next):
+        """Configure rate limiting with Redis when available."""
+        # Skip rate limiting for health checks
+        if request.url.path in ["/health", "/healthz", "/metrics"]:
+            return await call_next(request)
+
+        # Apply rate limiting if Redis is available
         if hasattr(app.state, 'redis') and app.state.redis:
-            # Create rate limit middleware instance
-            rate_limiter = RateLimitMiddleware(
-                app=None,  # Not used in direct call
-                redis_client=app.state.redis,
-                default_max_requests=60,
-                default_window_seconds=60
-            )
-            return await rate_limiter.dispatch(request, call_next)
+            try:
+                rate_limiter = RateLimitMiddleware(
+                    redis_client=app.state.redis,
+                    default_max_requests=settings.rate_limit_requests,
+                    default_window_seconds=settings.rate_limit_window
+                )
+                return await rate_limiter.dispatch(request, call_next)
+            except Exception as e:
+                logger.warning(f"Rate limiting failed, proceeding without: {e}")
+                return await call_next(request)
         else:
-            # Skip rate limiting if Redis is not available
+            # No Redis available, skip rate limiting
             return await call_next(request)
 
     # Global exception handlers
@@ -297,18 +399,28 @@ def create_app() -> FastAPI:
         # Check database
         if hasattr(app.state, 'use_asyncpg') and app.state.use_asyncpg:
             try:
-                from db.asyncpg_adapter import db_adapter
+                from src.db.asyncpg_adapter import db_adapter
                 db_status = await db_adapter.health_check()
             except Exception as e:
                 db_status = {"status": "unhealthy", "error": str(e)}
         else:
-            db_status = await check_database_health()
+            try:
+                # Ensure database is initialized before health check
+                if not hasattr(app.state, 'db_available') or not app.state.db_available:
+                    # Try to initialize database if not already done
+                    from src.db.base import init_database
+                    await init_database()
+                    app.state.db_available = True
+
+                db_status = await check_database_health()
+            except Exception as e:
+                db_status = {"status": "unhealthy", "error": str(e)}
         
         # Check Redis
         redis_status = {"status": "unknown"}
         try:
-            if redis_client:
-                redis_status = await check_redis_health(redis_client)
+            if hasattr(app.state, 'redis') and app.state.redis:
+                redis_status = await check_redis_health(app.state.redis)
             else:
                 redis_status = {"status": "unhealthy", "error": "Redis client not initialized"}
         except Exception as e:
@@ -317,7 +429,7 @@ def create_app() -> FastAPI:
         # Check payment service
         payment_status = {"status": "unknown"}
         try:
-            from bot.services.payment_service import PaymentService
+            from src.bot.services.payment_service import PaymentService
             payment_service = PaymentService()
             is_healthy = await payment_service.health_check()
             payment_status = {"status": "healthy" if is_healthy else "unhealthy"}
@@ -366,9 +478,9 @@ def create_app() -> FastAPI:
     @app.get("/health/search")
     async def search_health_check(request: Request) -> dict[str, str | dict]:
         """Comprehensive health check for search functionality."""
-        from bot.services.search_debugger import search_debugger
-        from bot.services.search_metrics import search_metrics
-        from bot.services.vinted_service import VintedService
+        from src.bot.services.search_debugger import search_debugger
+        from src.bot.services.search_metrics import search_metrics
+        from src.bot.services.vinted_service import VintedService
         
         request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
         
@@ -429,7 +541,7 @@ def create_app() -> FastAPI:
     @app.get("/health/search/metrics")
     async def search_metrics_endpoint(request: Request) -> dict[str, str | dict]:
         """Get detailed search metrics and statistics."""
-        from bot.services.search_metrics import search_metrics
+        from src.bot.services.search_metrics import search_metrics
         
         request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
         
@@ -455,8 +567,8 @@ def create_app() -> FastAPI:
     @app.get("/health/search/debug/{correlation_id}")
     async def search_debug_info(correlation_id: str, request: Request) -> dict[str, str | dict]:
         """Get debug information for a specific search operation."""
-        from bot.services.search_debugger import search_debugger
-        from bot.services.search_metrics import search_metrics
+        from src.bot.services.search_debugger import search_debugger
+        from src.bot.services.search_metrics import search_metrics
         
         request_id = getattr(request.state, 'request_id', str(uuid.uuid4()))
         
@@ -490,145 +602,172 @@ def create_app() -> FastAPI:
             )
 
     @app.post(settings.webhook_path)
-    @rate_limit(max_requests=60, window_seconds=60, key_suffix="telegram_webhook")
-    async def webhook_handler(request: Request) -> dict[str, str]:
-        """Handle incoming webhook updates from Telegram."""
+    async def telegram_webhook_handler(request: Request) -> dict[str, str]:
+        """Handle incoming webhook updates from Telegram with security validation."""
         request_id = getattr(request.state, 'request_id', 'unknown')
 
-        # Skip webhook signature validation in development mode
-        if settings.debug:
-            logger.info("Skipping webhook signature validation in debug mode")
-        else:
-            # Verify webhook secret using secure validation
-            from security.session_manager import webhook_validator
-            from exceptions import InvalidWebhookSignatureError
-            
+        # Security: Validate request size
+        content_length = request.headers.get("content-length", "0")
+        try:
+            if int(content_length) > MAX_REQUEST_SIZE:
+                logger.warning(
+                    "Request too large",
+                    request_id=request_id,
+                    content_length=content_length
+                )
+                raise CustomHTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Request payload too large",
+                    request_id=request_id
+                )
+        except ValueError:
+            pass  # Invalid content-length header, continue
+
+        # Security: Webhook signature validation (always enabled in production)
+        if settings.is_production or not settings.is_development:
             secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
             if not secret_token:
                 client_ip = request.client.host if request.client else 'unknown'
                 logger.warning(
-                    f"Missing webhook secret token from {client_ip}",
+                    "Missing webhook secret token",
                     request_id=request_id,
                     client_ip=client_ip
                 )
                 raise InvalidWebhookSignatureError("Missing secret token")
-            
+
             # Get raw body for signature verification
-            body = await request.body()
-            
+            try:
+                body = await request.body()
+            except Exception as e:
+                logger.error(
+                    "Failed to read request body",
+                    request_id=request_id,
+                    error=str(e)
+                )
+                raise CustomHTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid request body",
+                    request_id=request_id
+                )
+
             if not webhook_validator.validate_telegram_webhook(body, secret_token):
                 client_ip = request.client.host if request.client else 'unknown'
                 logger.warning(
-                    f"Invalid webhook signature from {client_ip}",
+                    "Invalid webhook signature",
                     request_id=request_id,
                     client_ip=client_ip
                 )
                 raise InvalidWebhookSignatureError("Invalid webhook signature")
 
+            # Reset body for JSON parsing
+            request._body = body
+
+        # Parse and validate update data
         try:
-            # Parse update data
             update_data = await request.json()
-            
-            # Validate Telegram update structure
-            from validation import validate_telegram_update
-            from exceptions import ValidationError
-            
-            try:
-                validated_update = validate_telegram_update(update_data)
-            except ValidationError as ve:
-                logger.warning(
-                    f"Invalid Telegram update structure: {ve}",
-                    request_id=request_id,
-                    error_type=type(ve).__name__
-                )
-                raise CustomHTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Invalid update structure",
-                    request_id=request_id
-                )
-            
         except Exception as e:
             logger.warning(
-                f"Invalid JSON in webhook request: {e}",
+                "Invalid JSON in webhook request",
                 request_id=request_id,
-                error_type=type(e).__name__
+                error=str(e)
             )
             raise CustomHTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON payload",
                 request_id=request_id
             )
 
-        # Debug: Log raw update data in a compact, safe way
-        try:
-            keys = list(update_data.keys())
-            logger.info(f"DEBUG: Raw update data keys: {keys}")
-            if 'callback_query' in update_data:
-                cq = update_data['callback_query']
-                logger.info(
-                    "DEBUG: Raw callback_query detected",
-                    callback_data=cq.get('data'),
-                    from_id=cq.get('from', {}).get('id'),
-                    message_id=((cq.get('message') or {}).get('message_id'))
-                )
-        except Exception:
-            pass
+        # Security: Validate Telegram update structure
+        from .validation import validate_telegram_update
 
+        try:
+            validated_update = validate_telegram_update(update_data)
+        except ValidationError as ve:
+            logger.warning(
+                "Invalid Telegram update structure",
+                request_id=request_id,
+                error=str(ve)
+            )
+            raise CustomHTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid update structure",
+                request_id=request_id
+            )
+
+        # Process the update
         try:
             update = Update(**update_data)
 
-            # Extract user_id if available
+            # Extract user information for monitoring
             user_id = None
-            if update.message and update.message.from_user:
-                user_id = update.message.from_user.id
-            elif update.callback_query and update.callback_query.from_user:
-                user_id = update.callback_query.from_user.id
-            
-            # Store user_id in request state for monitoring
-            if user_id:
-                request.state.user_id = user_id
-
-            # Log update processing
+            chat_id = None
             update_type = "unknown"
+
             if update.message:
                 update_type = "message"
+                if update.message.from_user:
+                    user_id = update.message.from_user.id
+                chat_id = update.message.chat.id
             elif update.callback_query:
                 update_type = "callback_query"
-                logger.info(f"DEBUG: Callback query detected - data: {update.callback_query.data}")
+                if update.callback_query.from_user:
+                    user_id = update.callback_query.from_user.id
+                if update.callback_query.message:
+                    chat_id = update.callback_query.message.chat.id
             elif update.inline_query:
                 update_type = "inline_query"
-            
+                if update.inline_query.from_user:
+                    user_id = update.inline_query.from_user.id
+
+            # Store user context for monitoring
+            request.state.user_id = user_id
+            request.state.chat_id = chat_id
+            request.state.update_type = update_type
+
+            # Log update processing (without sensitive data)
             logger.info(
                 "Processing Telegram update",
                 request_id=request_id,
                 user_id=user_id,
+                chat_id=chat_id,
                 update_id=update.update_id,
                 update_type=update_type
             )
 
-            # Process update
-            await app.state.dp.feed_update(app.state.bot, update)
-            
-            # Record successful bot update
-            from monitoring import record_bot_update
-            record_bot_update(update_type, "success")
+            # Process update through bot dispatcher
+            if hasattr(app.state, 'dp') and app.state.dp:
+                await app.state.dp.feed_update(app.state.bot, update)
 
-            return {"status": "ok", "request_id": request_id}
+                # Record successful processing
+                from .monitoring import record_bot_update
+                record_bot_update(update_type, "success")
 
+                return {"status": "ok", "request_id": request_id}
+            else:
+                logger.error("Bot dispatcher not available", request_id=request_id)
+                raise CustomHTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Bot service temporarily unavailable",
+                    request_id=request_id
+                )
+
+        except CustomHTTPException:
+            raise
         except Exception as e:
             # Record failed bot update
-            from monitoring import record_bot_update
-            record_bot_update(update_type if 'update_type' in locals() else "unknown", "error")
-            
-            # Add more detailed error logging
-            import traceback
+            from .monitoring import record_bot_update
+            record_bot_update(update_type, "error")
+
+            # Log error with context
             logger.error(
-                f"Error processing webhook update: {e}",
+                "Error processing webhook update",
                 request_id=request_id,
+                user_id=user_id,
+                update_type=update_type,
                 error_type=type(e).__name__,
-                component="webhook_handler",
-                traceback=traceback.format_exc()
+                error=str(e)
             )
+
             raise CustomHTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to process update",
@@ -639,8 +778,8 @@ def create_app() -> FastAPI:
     @rate_limit(max_requests=30, window_seconds=60, key_suffix="payment_webhook")
     async def yookassa_webhook_handler(request: Request) -> dict[str, str]:
         """Handle YooKassa payment webhook notifications."""
-        from bot.services.payment_service import PaymentService
-        from db.base import get_db_session
+        from .bot.services.payment_service import PaymentService
+        from .db.base import get_db_session
         
         request_id = getattr(request.state, 'request_id', 'unknown')
 
@@ -680,7 +819,7 @@ def create_app() -> FastAPI:
 
                 if success:
                     # Record successful payment event
-                    from monitoring import record_payment_event
+                    from .monitoring import record_payment_event
                     record_payment_event("webhook_processed", "success")
                     
                     logger.info(
@@ -690,7 +829,7 @@ def create_app() -> FastAPI:
                     return {"status": "ok", "message": message, "request_id": request_id}
                 else:
                     # Record failed payment event
-                    from monitoring import record_payment_event
+                    from .monitoring import record_payment_event
                     record_payment_event("webhook_processed", "failed")
                     
                     logger.warning(
@@ -707,7 +846,7 @@ def create_app() -> FastAPI:
             raise
         except Exception as e:
             # Record error payment event
-            from monitoring import record_payment_event
+            from .monitoring import record_payment_event
             record_payment_event("webhook_processed", "error")
             
             logger.error(

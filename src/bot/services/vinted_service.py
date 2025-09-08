@@ -69,7 +69,10 @@ class VintedService:
                 "price": {"amount": 25.99 + i * 10, "currency_code": "EUR"},
                 "brand": {"title": "Mock Brand", "slug": "mock-brand"},
                 "size": {"title": "M"},
-                "user": {"login": f"user{1000+i}"},
+                "user": {
+                    "login": f"user{1000+i}",
+                    "city": ["Wien", "Graz", "Linz", "Salzburg"][i % 4]
+                },
                 "photo": {"url": f"https://images1.vinted.net/t/01_00_123/{item_id}.jpeg?s=312x624"},
                 "url": f"{self.base_url}/items/{item_id}-{query.lower().replace(' ', '-')}-item-{i+1}",
                 "_fallback": True

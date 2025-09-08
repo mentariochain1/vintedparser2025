@@ -1,9 +1,9 @@
 """Middleware package for FastAPI application."""
 
-from middleware.rate_limiting import RateLimitMiddleware, rate_limit
-from middleware.security import SecurityHeadersMiddleware, RequestLoggingMiddleware
-from middleware.request_id import RequestIDMiddleware
-from middleware.monitoring import MonitoringMiddleware
+from src.middleware.rate_limiting import RateLimitMiddleware, rate_limit
+from src.middleware.security import SecurityHeadersMiddleware, RequestLoggingMiddleware
+from src.middleware.request_id import RequestIDMiddleware
+from src.middleware.monitoring import MonitoringMiddleware
 
 __all__ = [
     "RateLimitMiddleware",

@@ -6,7 +6,7 @@ import signal
 import sys
 from typing import Dict, Any
 
-from config import settings
+from src.config import settings
 from tasks.queue import task_queue, TaskQueue
 from tasks.handlers import register_all_handlers
 

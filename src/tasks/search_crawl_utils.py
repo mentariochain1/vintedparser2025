@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import redis.asyncio as redis
 
-from config import settings
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 

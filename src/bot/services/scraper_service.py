@@ -7,10 +7,10 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-from bot.services.vinted_service import VintedService
-from bot.services.image import get_image_processor, VintedImageProcessor
-from monitoring import get_logger, record_vinted_api_request
-from exceptions import VintedAPIError, VintedServiceUnavailableError
+from src.bot.services.vinted_service import VintedService
+from src.bot.services.image import get_image_processor
+from src.monitoring import get_logger, record_vinted_api_request
+from src.exceptions import VintedAPIError, VintedServiceUnavailableError
 
 
 logger = get_logger(__name__)

@@ -3,9 +3,9 @@ from aiogram import F, Router, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.services.payment_service import PaymentService
-from bot.services.user_service import UserService
-from db.base import get_db_session
+from src.bot.services.payment_service import PaymentService
+from src.bot.services.user_service import UserService
+from src.db.base import get_db_session
 from .payment.status_formatters import (
     build_payment_status_message,
     get_user_status_info,

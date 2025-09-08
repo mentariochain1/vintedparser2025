@@ -1,0 +1,10 @@
+# Browser-based scraping dependencies
+playwright>=1.40.0
+pytest-playwright>=0.4.0
+
+# Optional: For better browser fingerprinting
+fake-useragent>=1.4.0
+
+# Note: After installing, run:
+# playwright install
+# playwright install-deps

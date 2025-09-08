@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
-from db.models import User, SavedSearch, Item
-from config import settings
+from src.db.models import User, SavedSearch, Item
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 

@@ -5,10 +5,10 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from bot.services.vinted_service import VintedService
-from db.base import get_db_session
-from db.crud import ItemCRUD, PhotoCRUD
-from db.models import Item, Photo
+from src.bot.services.vinted_service import VintedService
+from src.db.base import get_db_session
+from src.db.crud import ItemCRUD, PhotoCRUD
+from src.db.models import Item, Photo
 from tasks.queue import TaskQueue
 from tasks.search_crawl_utils import crawl_deduplicator
 

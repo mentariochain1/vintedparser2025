@@ -11,7 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
 from decimal import Decimal
 
-from exceptions import ValidationError
+from src.exceptions import ValidationError
 
 
 class TelegramUserInput(BaseModel):

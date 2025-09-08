@@ -95,7 +95,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     except Exception as e:
         # If SQLAlchemy fails, we'll use the asyncpg adapter
         logger.warning(f"SQLAlchemy session failed, falling back to asyncpg: {e}")
-        from db.asyncpg_adapter import get_asyncpg_connection
+        from src.db.asyncpg_adapter import get_asyncpg_connection
         async with get_asyncpg_connection() as conn:
             yield conn
 
@@ -107,7 +107,7 @@ async def init_database() -> None:
         
         # Create engine and ensure schema exists
         engine = get_engine()
-        from db.models import Base
+        from src.db.models import Base
         
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

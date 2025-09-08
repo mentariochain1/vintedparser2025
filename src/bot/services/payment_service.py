@@ -11,14 +11,14 @@ from uuid import uuid4
 from sqlalchemy .ext .asyncio import AsyncSession
 from yookassa import Configuration ,Payment
 
-from config import settings
-from db.crud import PaymentCRUD ,UserCRUD
-from exceptions import (
+from src.config import settings
+from src.db.crud import PaymentCRUD ,UserCRUD
+from src.exceptions import (
     PaymentError, PaymentCreationError, PaymentVerificationError,
     InvalidWebhookSignatureError, ConfigurationError
 )
-from utils.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
-from error_handlers import error_handler
+from src.utils.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
+from src.error_handlers import error_handler
 
 logger =logging .getLogger (__name__ )
 

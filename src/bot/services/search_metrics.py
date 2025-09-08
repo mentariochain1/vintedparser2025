@@ -8,7 +8,7 @@ from threading import Lock
 from dataclasses import dataclass
 
 from prometheus_client import Counter, Histogram, Gauge
-from monitoring import get_logger
+from src.monitoring import get_logger
 
 
 # Prometheus metrics for search operations

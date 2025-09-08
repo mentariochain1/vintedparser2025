@@ -11,7 +11,7 @@ from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramNetworkError
 
-from exceptions import (
+from src.exceptions import (
     VintedBotError, DatabaseError, UserNotFoundError, PaymentError,
     PaymentCreationError, PaymentVerificationError, WebhookError,
     InvalidWebhookSignatureError, VintedAPIError, VintedRateLimitError,

@@ -4,8 +4,8 @@ from aiogram import Router ,types
 from aiogram .filters import Command
 from sqlalchemy .ext .asyncio import AsyncSession
 
-from bot.services.user_service import UserService
-from db.base import get_db_session
+from src.bot.services.user_service import UserService
+from src.db.base import get_db_session
 
 router =Router ()
 user_service =UserService ()

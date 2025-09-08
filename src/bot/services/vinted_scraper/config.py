@@ -22,7 +22,14 @@ UA_MOBILE = [
 # Headers and retry settings
 DEFAULT_HEADERS = {
     "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9,de;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Cache-Control": "max-age=0",
 }
 
 MAX_RETRY_ATTEMPTS = 4

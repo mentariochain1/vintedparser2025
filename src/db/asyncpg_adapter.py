@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Any, Dict, List, Optional
 from urllib.parse import urlparse
 import asyncpg
 
-from config import settings
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 

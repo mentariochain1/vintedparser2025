@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from bot.services.payment_service import PaymentService
+from src.bot.services.payment_service import PaymentService
 
 payment_service = PaymentService()
 

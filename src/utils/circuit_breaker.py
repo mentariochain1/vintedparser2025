@@ -12,7 +12,7 @@ from typing import Callable, Any, Optional, Dict
 from dataclasses import dataclass
 import logging
 
-from exceptions import CircuitBreakerError, ServiceUnavailableError
+from src.exceptions import CircuitBreakerError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 

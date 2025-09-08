@@ -1,0 +1,17 @@
+# Review checklist for @branch
+
+## Review the changes on @branch:
+
+- Check how data flows in the app. Explain new patterns and why you chose them.
+- Did any changes affect infrastructure?
+- Consider empty, loading, error, and offline states.
+- Review frontend changes for a11y (keyboard navigation, focus management, ARIA roles, color contrast).
+- If public APIs changed, check backwards compatibility or increment API version.
+- Did we add unnecessary dependencies? Can we inline a smaller version of heavy dependencies?
+- Did we add quality tests? Write fewer, high-quality tests. Choose integration tests for user flows.
+- Do schema changes need a database migration?
+- Changes to auth flows or permissions? Run `/security-review`.
+- Do feature flags need a new flag for this change?
+- If i18n is set up, are strings localized and routes internationalized?
+- Where should we use caching?
+- Are we missing important o11y or logging on backend changes?

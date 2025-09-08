@@ -10,8 +10,8 @@ import redis.asyncio as redis
 from fastapi import Request
 from prometheus_client import Counter as PrometheusCounter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
-from db.base import get_db_session
-from config import settings
+from src.db.base import get_db_session
+from src.config import settings
 
 # Prometheus metrics
 REQUEST_COUNT = PrometheusCounter(

@@ -8,8 +8,8 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from monitoring import get_logger, StructuredLogger
-from config import settings
+from src.monitoring import get_logger, StructuredLogger
+from src.config import settings
 
 
 class SearchStage(Enum):

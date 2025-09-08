@@ -66,9 +66,40 @@ class ReplyKeyboards:
     def hide_keyboard() -> ReplyKeyboardMarkup:
         """
         Hide the reply keyboard.
-        
+
         Returns:
             ReplyKeyboardRemove to hide persistent buttons
         """
         from aiogram.types import ReplyKeyboardRemove
         return ReplyKeyboardRemove()
+
+
+# Convenience functions for backward compatibility
+def get_main_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Get main menu keyboard (convenience function).
+
+    Returns:
+        ReplyKeyboardMarkup with main navigation buttons
+    """
+    return ReplyKeyboards.main_menu()
+
+
+def get_search_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Get search menu keyboard (convenience function).
+
+    Returns:
+        ReplyKeyboardMarkup with search options
+    """
+    return ReplyKeyboards.search_menu()
+
+
+def get_premium_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Get premium menu keyboard (convenience function).
+
+    Returns:
+        ReplyKeyboardMarkup with premium options
+    """
+    return ReplyKeyboards.premium_menu()

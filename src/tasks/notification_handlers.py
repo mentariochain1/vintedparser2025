@@ -8,10 +8,10 @@ from aiogram import Bot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tasks.queue import TaskQueue
-from db.base import get_db_session as get_async_session
-from db.models import Item
-from bot.services.notification_service import NotificationService
-from config import settings
+from src.db.base import get_db_session as get_async_session
+from src.db.models import Item
+from src.bot.services.notification_service import NotificationService
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 

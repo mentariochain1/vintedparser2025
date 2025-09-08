@@ -40,13 +40,23 @@ class SessionManager:
     def create_session(self) -> None:
         """Create new session with configuration."""
         user_agent = select_user_agent(self.mobile)
-        
+
         self.session = create_scraper_session(self.mobile)
         configure_session_ssl(self.session, self.verify_ssl)
-        
+
         headers = build_session_headers(user_agent)
         update_session_headers(self.session, headers)
-        
+
+        # First visit the main page to get proper cookies
+        try:
+            initial_response = self.session.get(self.base_url, timeout=10)
+            if initial_response.status_code == 200:
+                log.info("Successfully established initial connection to Vinted")
+            else:
+                log.warning("Initial connection returned status %d", initial_response.status_code)
+        except Exception as e:
+            log.warning("Failed to establish initial connection: %s", e)
+
         if test_session_connection(self.session, self.base_url):
             self._finalize_successful_session(user_agent)
         else:
@@ -109,6 +119,12 @@ class SessionManager:
         """Check if exception should abort retry loop."""
         if is_ssl_error(exc):
             log_ssl_error(exc, attempt)
+            # Try to recreate session without SSL verification
+            if self.verify_ssl:
+                log.warning("SSL error detected, switching to no SSL verification")
+                self.verify_ssl = False
+                self.create_session()
+                return False  # Don't abort, try again with SSL disabled
             return True
         return False
 

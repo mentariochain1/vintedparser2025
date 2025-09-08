@@ -1,12 +1,14 @@
 """Menu handlers for reply keyboard navigation."""
 
 from aiogram import Router, types, F
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.user_service import UserService
-from bot.keyboards import ReplyKeyboards
-from db.base import get_db_session
-from bot.services.search_metrics import search_metrics
+from src.bot.services.user_service import UserService
+from src.bot.keyboards import ReplyKeyboards
+from src.db.base import get_db_session
+from src.bot.services.search_metrics import search_metrics
+from src.bot.handlers.search import SearchStates
 
 async def _get_user_safely(user_id: int, message: types.Message):
     """Get user with database error handling."""
@@ -17,7 +19,7 @@ async def _get_user_safely(user_id: int, message: types.Message):
     except Exception as e:
         # Fall back to asyncpg
         try:
-            from bot.services.user_service_asyncpg import user_service_asyncpg
+            from src.bot.services.user_service_asyncpg import user_service_asyncpg
             user_data = await user_service_asyncpg.get_user_asyncpg(user_id)
             if user_data:
                 # Convert dict to object-like structure for compatibility
@@ -142,8 +144,8 @@ async def referral_handler(message: types.Message) -> None:
 async def premium_handler(message: types.Message) -> None:
     """Handle premium button press."""
     # Import here to avoid circular imports
-    from bot.handlers.payment_handlers import get_subscription_keyboard
-    from bot.handlers.payment.status_formatters import build_payment_status_message
+    from src.bot.handlers.payment_handlers import get_subscription_keyboard
+    from src.bot.handlers.payment.status_formatters import build_payment_status_message
 
     user_id = message.from_user.id
     first_name = message.from_user.first_name or ""
@@ -163,8 +165,12 @@ async def premium_handler(message: types.Message) -> None:
     )
 
 @router.message(F.text == "🔍 Поиск")
-async def search_button_handler(message: types.Message) -> None:
+async def search_button_handler(message: types.Message, state: FSMContext) -> None:
     """Handle search button press."""
+    # Reset state and set waiting for query so next text is treated as search
+    await state.clear()
+    await state.set_state(SearchStates.waiting_for_query)
+
     await message.answer(
         "🔍 Готов к поиску.\n\n"
         "Просто напиши, что найти. Например: <code>кроссовки Nike</code> или <code>винтажная куртка</code>.",
@@ -172,8 +178,12 @@ async def search_button_handler(message: types.Message) -> None:
     )
 
 @router.message(F.text == "🔍 Новый поиск")
-async def new_search_handler(message: types.Message) -> None:
+async def new_search_handler(message: types.Message, state: FSMContext) -> None:
     """Handle new search button press."""
+    # Reset state and set waiting for query so next text is treated as search
+    await state.clear()
+    await state.set_state(SearchStates.waiting_for_query)
+
     await message.answer(
         "🔍 Готов к поиску.\n\n"
         "Просто напиши, что найти. Например: <code>кроссовки Nike</code> или <code>винтажная куртка</code>.",

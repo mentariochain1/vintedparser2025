@@ -64,7 +64,15 @@ def configure_session_ssl(session: requests.Session, verify_ssl: bool):
 def build_session_headers(user_agent: str) -> dict:
     """Build headers for session."""
     headers = DEFAULT_HEADERS.copy()
-    headers["User-Agent"] = user_agent
+    headers.update({
+        "User-Agent": user_agent,
+        "Referer": "https://www.vinted.at/",
+        "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "DNT": "1",
+        "Sec-Fetch-User": "?1",
+    })
     return headers
 
 def update_session_headers(session: requests.Session, headers: dict):

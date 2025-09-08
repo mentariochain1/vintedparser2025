@@ -1,0 +1,19 @@
+# Image Processing Dependencies for Image Extraction Service
+
+# Core image processing libraries
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# OCR capabilities
+pytesseract>=0.3.10
+
+# Note: Tesseract OCR engine must be installed separately on the system
+# For macOS: brew install tesseract tesseract-lang
+# For Ubuntu/Debian: apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus
+# For Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+
+# Optional: Enhanced object detection (uncomment if needed)
+# torch>=2.0.0
+# torchvision>=0.15.0
+# ultralytics>=8.0.0  # For YOLO models
